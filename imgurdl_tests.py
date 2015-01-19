@@ -1,5 +1,5 @@
 import unittest
-import imgurdl as imgur
+import imgurdl
 
 class ImgurDownlaoderTests(unittest.TestCase):
 
@@ -32,31 +32,32 @@ class ImgurDownlaoderTests(unittest.TestCase):
                                     "r4KjYry"]
                             }
 
+        self.imgur = imgurdl.ImgurDL()
         
     def test_parse_id_for_albums(self):
         """ Make sure imgur album paths are correctly parsed. """
-        for answer, cases in self.test_albums.items():
-            for case in cases:
-                self.assertEqual(imgur.parse_id(case), answer)
+        for token in self.test_albums:
+            for test_case in self.test_albums[token]:
+                self.assertEqual(self.imgur.parse_token(test_case), token)
 
     def test_parse_id_for_images(self):
         """ Make sure imgur image paths are correctly parsed. """
-        for answer, cases in self.test_images.items():
-            for case in cases:
-                self.assertEqual(imgur.parse_id(case), answer)
-
+        for token in self.test_images:
+            for test_case in self.test_images[token]:
+                self.assertEqual(self.imgur.parse_token(test_case), token)
+        
     def test_is_album(self):
         """ Try to identify an album from the URL. """
-        
         # First check the albums.
-        for album in self.test_albums.keys():
+        for album in self.test_albums:
             for case, status in zip(self.test_albums[album], self.test_albums_status[album]):
-                self.assertEqual(imgur.is_album(case), status)
+                response = self.imgur.is_album(case)
+                self.assertEqual(response, status)
 
         # Now check the images.
         for cases in self.test_images.values():
             for case in cases:
-                self.assertFalse(imgur.is_album(case))
+                self.assertFalse(self.imgur.is_album(case))
 
 
 if __name__ == '__main__':

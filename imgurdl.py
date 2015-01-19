@@ -12,17 +12,13 @@ class ImgurDL:
     on its own.
     """
 
-    def __init__(self, out_path="."):
-        """ Initialize the new Imgur downloader. 
-
-        TODO: simplify this bit.
-        """
+    def __init__(self):
         # Flag to use the default directory, which will be the same as the 
         # album or image ID. (E.g., /a/abcde will be saved to ./abcde/)
         self.use_default_directory = True
 
         # Output directory. If specified, all downloads go into this directory.
-        self.output_dir = out_path
+        self.output_dir = os.path.dirname(os.path.realpath(__file__))
 
         # Set of 2-tuples containing the string tokens of each image and album
         self.token_list = set()     # each item is (token, token type}
@@ -31,7 +27,7 @@ class ImgurDL:
         # List of 3-tuples containing the URLs to fetch and the output directory.
         self.download_list = set()  # each item is (url, output dir, output file)
 
-        # Establish a pool manager
+        # Establish a HTTP connection pool manager
         self.http = urllib3.PoolManager()
 
     def parse_token(self, token):
@@ -47,6 +43,19 @@ class ImgurDL:
         # Match the string ID of the Imgur album or image
         token = re.search(token_pattern, stripped_id).groups()[0]
         return token
+
+    def is_album(self, url):
+        """ Parses a URL for the album directory. 
+
+        Return True if the album URL is found (e.g., /a/token, or imgur.com/a/token)
+        Return False otherwise.
+        """
+        domain_pattern = r"(imgur.com/)?(a/)"
+        result = re.search(domain_pattern, url, flags = re.IGNORECASE)
+        if result is None:
+            return False
+        else:
+            return True
 
     def extract_urls(self, token_list):
         """ From the converted token list, the image files are scraped from Imgur and
@@ -180,6 +189,8 @@ def debug(imgur):
 def main(argv):
     global _debug
     _debug = False
+    _album_flag = False
+    _img_flag = False
 
     #Set the command-line flags that will be used by the script.
     try:
@@ -208,37 +219,50 @@ def main(argv):
         
         elif opt in ("-a", "--albums"):
             album_args = arg.split(" ")
+            _album_flag = True
+
             for album in album_args:
                 token = imgur.parse_token(album)
                 imgur.token_list.add( (token, "album") )
             
         elif opt in ("-i", "--images"):
             image_args = arg.split(" ")
+            _img_flag = True
             for image in image_args:
                 token = imgur.parse_token(image)
                 imgur.token_list.add( (token, "image") )
 
+    # Look at the command-line arguments now.
+    # Exit the program if no useful download tokens were passed.
+    if len(args) > 0:
+        album_args = []
+        img_args = []
+        for a in args:
+            a_token = imgur.parse_token(a)
+            if imgur.is_album(a):
+                album_args.append(a_token)
+            else:
+                img_args.append(a_token)
 
-    """
-    parse IDs from mixed arguments (done)
-      --> reconstruct URLs (done)
-        --> feed URLs into web parse (done)
-          --> extract image URLs and record output location (done)
-            --> download the files (done)
-    """
-
-    # If requested, print debug information.
-    debug(imgur)
-
-    #print(opts)
-    #print(args)
-
-    print("Extracting URLs.")
-    imgur.extract_urls(imgur.token_list)
-    print("Saving images.")
-    imgur.save_images()
-
-
+        for token in album_args:
+            imgur.token_list.add( (token, "album") )
+        else:
+            _album_flag = True
+        
+        for token in img_args:
+            imgur.token_list.add( (token, "image") )
+        else:
+            _img_flag = True
+    
+    # Download the images passed in the options.
+    if _album_flag or _img_flag:
+        # If requested, print debug information.
+        debug(imgur)
+    
+        imgur.extract_urls(imgur.token_list)
+        imgur.save_images()
+    else:
+        ImgurDL.usage()
 
 if __name__ == '__main__':
     main(sys.argv[1:])
