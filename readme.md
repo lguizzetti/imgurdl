@@ -28,7 +28,7 @@ or using the full image URL:
 
     $ python imgurdl.py -i="http://i.imgur.com/3PmuS9F"
 
-To download multipe albums, you can also mix URLs and tokens togeter:
+To download multipe albums, you can also mix URLs and tokens together:
 
     $ python imgurdl.py -a="H7phc http://imgur.com/a/CYDeW"
 

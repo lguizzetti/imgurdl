@@ -161,14 +161,27 @@ class ImgurDL:
 
     @staticmethod
     def usage():
-        # TODO
-        a = """Usage:
-        $ python imgurdl.py
-        
-        Help:
-          $ python imgurdl.py [-h|--help]
-        """
-        print(a)
+        """ Prints a help message. """
+        msg = ['Description: Quickly and easily download imgur images and albums.',
+        'High qualiity images are saved in sub-directories for albums, or output',
+        'path for images.\n',
+        'Usage:\n',
+        '$ python imgurdl.py [-d] [-a "albums ..."] [-i "images ..."] [-o output-dir]',
+        '(Both albums and images are identified by URLs or string tokens.)',
+        '\n$ python imgurdl.py [-o output-dir] [/a/album1 /a/album2...] [images...]\n',
+        'Options:\n',
+        '-a="...", --albums="URLs or tokens"\tAlbums to download.',
+        '                                        A token looks like "ad213ea".\n',
+        '-i="...", --images="image URLs or tokens"     Images to download.\n',
+        '-o="...", --out="/out/dir"     Output path. Default is the script path.\n',
+        '-d, --debug\n',
+        '-h, --help\n',
+        'Notes:',
+        '\nURLs and tokens can be mixed. For example, downloading multiple images and albums:',
+        '$ python imgurdl.py -a="H7phc http://imgur.com/a/CYDeW" -i="zMZSWtg i.imgur.com/3PmuS9F"\n',
+        'Alternatively, by prefixing albums with "/a/", followed by any image URLs:',
+        '$ python imgurdl.py [--out=path] [/a/albums ...] [images ...]']
+        print("\n".join(msg))
 
 
 def debug(imgur):
