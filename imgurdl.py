@@ -1,54 +1,244 @@
 import re
+import sys
+import getopt
+import os
+import urllib3
+import io
 
-def parse_id(path):
-    """ Takes in either a URL or Imgur album or picture name (path), and
-    returns just the string ID of the image(s).
+class ImgurDL:
+    """ A class to download images and albums from Imgur (TM).
+
+    This script can be called from the command-line or the class can be used 
+    on its own.
     """
-    domain_pattern = r"^(https://|http://)?(www.)?(imgur.com)?(/a/)?"
-    id_pattern = r"([a-zA-Z0-9]{1,})(/)?$"
 
-    # If the path matches a URL pattern, then drop the URL domain portion.
-    stripped_path = re.sub(domain_pattern, '', path, flags = re.IGNORECASE)
+    def __init__(self, out_path="."):
+        """ Initialize the new Imgur downloader. 
 
-    # Match the string ID of the Imgur album or image
-    id = re.search(id_pattern, stripped_path).groups()[0]
-    return id
+        TODO: simplify this bit.
+        """
+        # Flag to use the default directory, which will be the same as the 
+        # album or image ID. (E.g., /a/abcde will be saved to ./abcde/)
+        self.use_default_directory = True
+
+        # Output directory. If specified, all downloads go into this directory.
+        self.output_dir = out_path
+
+        # Set of 2-tuples containing the string tokens of each image and album
+        self.token_list = set()     # each item is (token, token type}
+                                    # where type is either "image" or "string"
+
+        # List of 3-tuples containing the URLs to fetch and the output directory.
+        self.download_list = set()  # each item is (url, output dir, output file)
+
+        # Establish a pool manager
+        self.http = urllib3.PoolManager()
+
+    def parse_token(self, token):
+        """ Takes in either a URL or Imgur album or picture name (token), and
+        returns just the string token of the image(s).
+        """
+        domain_pattern = r"(https://|http://)?(www.)?(imgur.com)?(/a/)?"
+        token_pattern = r"([a-zA-Z0-9]{1,})(/)?$"
+
+        # If the token matches a URL pattern, then drop the URL domain portion.
+        stripped_id = re.sub(domain_pattern, '', token, flags = re.IGNORECASE)
+
+        # Match the string ID of the Imgur album or image
+        token = re.search(token_pattern, stripped_id).groups()[0]
+        return token
+
+    def extract_urls(self, token_list):
+        """ From the converted token list, the image files are scraped from Imgur and
+        stored in a list for download.
+        """
+        # iterate over all collected tokens
+        for item in token_list:
+            (token, token_type) = item
+
+            # Get the temporary NoScript URL. This will extract the URL from the HTML page.
+            if token_type == "album":
+                req_url = "http://i.imgur.com/a/{0}/noscript".format(token)
+            elif token_type == "image":
+                req_url = "http://i.imgur.com/{0}".format(token)
+            else:
+                print("Something went wrong!")
+
+            # All of the image links are easily grabbed from the meta tags in the HTML head tags.
+            pattern = re.compile(r'''
+                (<meta[ ]+property="og:image"[ ]+content=")    # start of the meta tag for an image.
+                (http://i.imgur.com/)                          # domain for the image server.
+                ([a-zA-Z0-9]+)                                 # image ID
+                (.jpg|.jpeg|.png|.gif)                         # file extension
+                (\?[a-zA-Z0-9]+)?                              # additional modifier of images
+                ("[ ]+/>)                                      # end of the tag.
+                ''', re.VERBOSE)
+            
+            # Request the HTML page.
+            req_html = self.http.urlopen("GET", req_url, preload_content = False)
+
+            # Make sure a successful HTTP request was made.
+            if req_html.status != 200:
+                print("HTTP {0}, skipping {1}".format(req_html.status, req_url))
+                #raise IOError("Error: unsuccessful HTTP request (HTTP code {0}).".format(req_html.status))
+
+            # Read the HTML content in a buffered way.
+            buffered_html = io.BufferedReader(req_html)
+            html = buffered_html.read().decode("utf-8")
+
+            # # Find all matches for the images.
+            all_matches = pattern.findall(html)
+
+            # Extract each matched URL and add it to a set.
+            domain = "http://i.imgur.com/"
+            for match in all_matches:
+                im_token = match[2]
+                file_ext = match[3]
+                
+                # Make sure that images from an album go in their own folder.
+                if token_type == "album":
+                    file_name = "{0}{1}".format(im_token, file_ext)
+                    url = "{0}download/{1}{2}".format(domain, im_token, file_ext)
+                    download_dir = os.path.join(self.output_dir, token)
+                    download_path = "{0}/{1}".format( download_dir, file_name )
+
+                # individual images go straight to the output directory
+                elif token_type == "image":
+                    file_name = "{0}{1}".format(token, file_ext)
+                    url = "{0}download/{1}{2}".format(domain, token, file_ext)
+                    download_dir = self.output_dir
+                    download_path = "{0}/{1}".format( download_dir, file_name )
+                
+                self.download_list.add( (url, download_dir, file_name) )
 
 
-def is_album(path):
-    """ Tries to determine if the supplied path is for an imgur album.
+    def save_images(self):
+        """ Save the images to the disk. """        
+        for url, odir, ofile in sorted(list(self.download_list)):
+            
+            # Produce the absolute output path.
+            opath = os.path.abspath(os.path.join(odir, ofile))
 
-    Returns True if an album flag is found. False if unknown or not detected.
+            # Make any new directories as needed, recursively.
+            self.__mkdir_recursive(odir)
+
+            # Actually download the file finally.
+            with open(opath, 'wb+') as f:
+                req = self.http.urlopen("GET", url, preload_content=False)
+                buf = io.BufferedReader(req)
+                f.write(buf.read())
+                f.close()
+
+        # Clean up by closing all connections.
+        self.http.clear()
+
+
+    def __mkdir_recursive(self, path):
+        """ Recursively makes directories along a path. """
+        sub_path = os.path.dirname(path)
+        
+        if not os.path.exists(sub_path):
+            self.__mkdir_recursive(sub_path)
+        
+        if not os.path.exists(path):
+            os.mkdir(path)
+
+
+    def __create_output_dir(self):
+        """ Verify the output directory path exists, and create it if it does not
+        exist yet. """
+        if not os.path.isdir(self.output_dir):
+            os.mkdir(path)
+
+    @staticmethod
+    def usage():
+        # TODO
+        a = """Usage:
+        $ python imgurdl.py
+        
+        Help:
+          $ python imgurdl.py [-h|--help]
+        """
+        print(a)
+
+
+def debug(imgur):
+    """ Print debug information when calling this script from the command line. """
+    if _debug:
+        print("Debug mode: On")
+        print("\nOutput directory: {0}".format(imgur.output_dir))
+        print("====== Downloads ========")
+        
+        i = 0
+        for item in imgur.token_list:
+            i += 1
+            (token, token_type) = item
+            print("{0}. {1}: {2}".format(i, token_type.title(), token))
+        print("\n")
+        
+
+def main(argv):
+    global _debug
+    _debug = False
+
+    #Set the command-line flags that will be used by the script.
+    try:
+        opts, args = getopt.getopt(argv, "ha:i:o:d", ["help", "albums=", "images=", "out=", "debug"])
+    except getopt.GetoptError:
+        # Exit if there is an unrecognized flag passed, printing the usage guide.
+        ImgurDL.usage()
+        sys.exit()
+
+    # Instantiate an imgur downloader.
+    imgur = ImgurDL()
+
+    # Process the command line flags.
+    for opt, arg in opts:
+        if opt in ("-h", "--help"):
+            ImgurDL.usage()
+            sys.exit()
+        
+        elif opt in ("-d", "--debug"):
+            # Enable extra debug information to be printed to stdout.
+            _debug = True
+
+        elif opt in ("-o", "--out"):
+            imgur.use_default_directory = False
+            imgur.output_dir = arg
+        
+        elif opt in ("-a", "--albums"):
+            album_args = arg.split(" ")
+            for album in album_args:
+                token = imgur.parse_token(album)
+                imgur.token_list.add( (token, "album") )
+            
+        elif opt in ("-i", "--images"):
+            image_args = arg.split(" ")
+            for image in image_args:
+                token = imgur.parse_token(image)
+                imgur.token_list.add( (token, "image") )
+
+
     """
-    album_pattern = r"(/a/){1}"
-    result = re.search(album_pattern, path, flags = re.IGNORECASE)
-    if result is not None:
-        return True
-    
-    return False
+    parse IDs from mixed arguments (done)
+      --> reconstruct URLs (done)
+        --> feed URLs into web parse (done)
+          --> extract image URLs and record output location (done)
+            --> download the files (done)
+    """
+
+    # If requested, print debug information.
+    debug(imgur)
+
+    #print(opts)
+    #print(args)
+
+    print("Extracting URLs.")
+    imgur.extract_urls(imgur.token_list)
+    print("Saving images.")
+    imgur.save_images()
 
 
 
 if __name__ == '__main__':
-
-    test_albums = [ "https://imgur.com/a/Dhjed", "https://imgur.com/a/Dhjed/",
-            	"http://imgur.com/a/Dhjed", "http://imgur.com/a/Dhjed/",
-            	"https://www.imgur.com/a/Dhjed", "https://www.imgur.com/a/Dhjed/",
-                "http://www.imgur.com/a/Dhjed", "http://www.imgur.com/a/Dhjed/",
-            	"imgur.com/a/Dhjed", "imgur.com/a/Dhjed/",
-            	"imgur.com/a/Dhjed", "imgur.com/a/Dhjed/",
-            	"www.imgur.com/a/Dhjed", "www.imgur.com/a/Dhjed/",
-            	"www.imgur.com/a/Dhjed", "www.imgur.com/a/Dhjed/",
-            	"Dhjed" ]
-
-    
-    test_images = [ "https://imgur.com/r4KjYry", "https://imgur.com/r4KjYry/",
-                "https://www.imgur.com/r4KjYry", "https://www.imgur.com/r4KjYry/",
-                "http://imgur.com/r4KjYry", "http://imgur.com/r4KjYry/",
-                "http://www.imgur.com/r4KjYry", "http://www.imgur.com/r4KjYry/",
-                "imgur.com/r4KjYry", "imgur.com/r4KjYry/",
-                "www.imgur.com/r4KjYry", "www.imgur.com/r4KjYry/",
-                "imgur.com/r4KjYry", "imgur.com/r4KjYry/",
-                "www.imgur.com/r4KjYry", "www.imgur.com/r4KjYry/",
-                "r4KjYry" ]
-    
+    main(sys.argv[1:])
