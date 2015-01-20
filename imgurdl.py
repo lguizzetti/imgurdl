@@ -128,8 +128,9 @@ class ImgurDL:
             # Produce the absolute output path.
             opath = os.path.abspath(os.path.join(odir, ofile))
 
-            # Make any new directories as needed, recursively.
-            self.__mkdir_recursive(odir)
+            # Make any new directories as needed.
+            if not os.path.isdir(odir):
+                os.makedirs(odir)
 
             # Actually download the file finally.
             with open(opath, 'wb+') as f:
@@ -141,23 +142,6 @@ class ImgurDL:
         # Clean up by closing all connections.
         self.http.clear()
 
-
-    def __mkdir_recursive(self, path):
-        """ Recursively makes directories along a path. """
-        sub_path = os.path.dirname(path)
-        
-        if not os.path.exists(sub_path):
-            self.__mkdir_recursive(sub_path)
-        
-        if not os.path.exists(path):
-            os.mkdir(path)
-
-
-    def __create_output_dir(self):
-        """ Verify the output directory path exists, and create it if it does not
-        exist yet. """
-        if not os.path.isdir(self.output_dir):
-            os.mkdir(path)
 
     @staticmethod
     def usage():
