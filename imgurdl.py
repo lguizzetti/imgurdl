@@ -4,6 +4,7 @@ import getopt
 import os
 import urllib3
 import io
+from bs4 import BeautifulSoup as bs
 
 class ImgurDL:
     """ A class to download images and albums from Imgur (TM).
@@ -73,52 +74,39 @@ class ImgurDL:
             else:
                 print("Something went wrong!")
 
-            # All of the image links are easily grabbed from the meta tags in the HTML head tags.
-            pattern = re.compile(r'''
-                (<meta[ ]+property="og:image"[ ]+content=")    # start of the meta tag for an image.
-                (http://i.imgur.com/)                          # domain for the image server.
-                ([a-zA-Z0-9]+)                                 # image ID
-                (.jpg|.jpeg|.png|.gif)                         # file extension
-                (\?[a-zA-Z0-9]+)?                              # additional modifier of images
-                ("[ ]+/>)                                      # end of the tag.
-                ''', re.VERBOSE)
-            
-            # Request the HTML page.
-            req_html = self.http.urlopen("GET", req_url, preload_content = False)
+            # All of the image links are inside div tags in the body
+            html = self.http.urlopen("GET", req_url, preload_content = False)
 
-            # Make sure a successful HTTP request was made.
-            if req_html.status != 200:
-                print("HTTP {0}, skipping {1}".format(req_html.status, req_url))
-                #raise IOError("Error: unsuccessful HTTP request (HTTP code {0}).".format(req_html.status))
+            # create BeautifulSoup object for html parsing
+            soup = bs(html.data, "html.parser")
 
-            # Read the HTML content in a buffered way.
-            buffered_html = io.BufferedReader(req_html)
-            html = buffered_html.read().decode("utf-8")
+            # set up list for links
+            filenames = []
 
-            # # Find all matches for the images.
-            all_matches = pattern.findall(html)
+            # find all post image links
+            data = soup.findAll("div", attrs={"class":"post-image"})
+            for div in data:
+                for a in div:
+                    if a.name == "a":
+                        # links are in the form //i.imgur.com/[token].[file extension]
+                        # this will take only the filename
+                        filenames.append(a["href"].split('/')[-1])
 
             # Extract each matched URL and add it to a set.
             domain = "http://i.imgur.com/"
-            for match in all_matches:
-                im_token = match[2]
-                file_ext = match[3]
-                
+            for im_filename in filenames:
                 # Make sure that images from an album go in their own folder.
                 if token_type == "album":
-                    file_name = "{0}{1}".format(im_token, file_ext)
-                    url = "{0}download/{1}{2}".format(domain, im_token, file_ext)
+                    url = "{0}download/{1}".format(domain, im_filename)
                     download_dir = os.path.join(self.output_dir, token)
-                    download_path = "{0}/{1}".format( download_dir, file_name )
+                    download_path = "{0}/{1}".format( download_dir, im_filename )
 
                 # individual images go straight to the output directory
                 elif token_type == "image":
-                    file_name = "{0}{1}".format(token, file_ext)
-                    url = "{0}download/{1}{2}".format(domain, token, file_ext)
+                    url = "{0}download/{1}".format(domain, im_filename)
                     download_dir = self.output_dir
-                    download_path = "{0}/{1}".format( download_dir, file_name )
-                
-                self.download_list.add( (url, download_dir, file_name) )
+                    download_path = "{0}/{1}".format( download_dir, im_filename )
+                self.download_list.add( (url, download_dir, im_filename) )
 
 
     def save_images(self):
